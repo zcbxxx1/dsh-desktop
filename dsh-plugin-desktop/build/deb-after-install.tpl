@@ -59,14 +59,15 @@ fi
 # --- dsh-plugin-desktop: route the desktop entry through the runtime launcher ---
 #
 # The package carries its own dynamic loader and library set under `lib/`, and
-# the main executable is retargeted at `lib/ld-linux-aarch64.so.1`. That loader
-# resolves the bundled libraries from LD_LIBRARY_PATH, which the launcher
-# supplies. Electron Builder derives the .desktop Exec key from
-# `linux.executableName` and rejects overriding it in `linux.desktop.Exec`, so
-# the redirect happens here instead.
+# the main executable is retargeted at `lib/ld-linux-aarch64.so.1` with a
+# `DT_RPATH` of `$ORIGIN:$ORIGIN/lib`. The loader finds the bundled libraries on
+# its own; the launcher only prepares the runtime environment (vendor shim, X11
+# session type, Vulkan ICD, Chromium switches). Electron Builder derives the
+# .desktop Exec key from `linux.executableName` and rejects overriding it in
+# `linux.desktop.Exec`, so the redirect happens here instead.
 #
 # This mirrors how the Kylin Web App Engine ships a bundled glibc: a shell entry
-# point that exports LD_LIBRARY_PATH and execs a `.exec` payload.
+# point that prepares the environment and execs a `.exec` payload.
 DESKTOP_FILE='/usr/share/applications/${executable}.desktop'
 LAUNCHER='/opt/${sanitizedProductName}/dsh-desktop-launch'
 if [ -f "$DESKTOP_FILE" ] && [ -x "$LAUNCHER" ]; then
