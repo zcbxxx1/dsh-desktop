@@ -29,6 +29,12 @@ if [ ! -x "$DIR/dsh-desktop" ]; then
   exit 1
 fi
 
+# A parent shell may carry Electron/Node shims (some IDEs and launchers inject
+# them). ELECTRON_RUN_AS_NODE collapses Electron into plain Node, where every
+# Chromium switch becomes "bad option", and NODE_OPTIONS injects a require hook.
+unset ELECTRON_RUN_AS_NODE
+unset NODE_OPTIONS
+
 # Prepend so the bundled set wins, but keep any caller-supplied entries.
 LD_LIBRARY_PATH="$DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export LD_LIBRARY_PATH
@@ -41,5 +47,22 @@ if [ -r /etc/vulkan/icd.d/maleoon_vulkan.json ]; then
   VK_ICD_FILENAMES=/etc/vulkan/icd.d/maleoon_vulkan.json
   export VK_ICD_FILENAMES
 fi
+
+# Force the vendor X11 path. /opt/x11-wayland/x11-ext.sh does exactly this for
+# Kirin parts, and it is load-bearing: with XDG_SESSION_TYPE=wayland inherited
+# from the desktop session the app dies with SIGSEGV before any window appears,
+# while X11 mode starts cleanly. WAYLAND_DISPLAY is dropped for the same reason.
+export XDG_SESSION_TYPE=x11
+unset WAYLAND_DISPLAY
+
+# Chromium's sandbox needs either a setuid `chrome-sandbox` helper or working
+# unprivileged user namespaces. This package ships the helper without the setuid
+# bit — Electron Builder's postinst only sets it when `unshare --user` fails, and
+# on this kernel that probe succeeds while the real namespace sandbox still
+# aborts the renderer. Disable it unless the caller already decided.
+case " $* " in
+  *" --no-sandbox "*) ;;
+  *) set -- --no-sandbox "$@" ;;
+esac
 
 exec "$DIR/dsh-desktop" "$@"
