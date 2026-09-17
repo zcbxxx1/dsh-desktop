@@ -14,16 +14,20 @@
  *
  *   1. `PT_INTERP` — the kernel must load `<app>/lib/ld-linux-aarch64.so.1`
  *      instead of `/lib/ld-linux-aarch64.so.1`. Only the interpreter decides
- *      which libc is in play; `LD_LIBRARY_PATH` cannot change that.
- *   2. Nothing else. The bundled loader resolves the bundled libraries from
- *      `LD_LIBRARY_PATH`, which the shipped launcher sets.
+ *      which libc is in play; no environment variable can change that.
+ *   2. `DT_RPATH` — so the bundled loader finds the bundled libraries, and
+ *      those libraries find each other, without any environment involvement.
  *
- * Why not `DT_RUNPATH` / `$ORIGIN`
- * --------------------------------
- * Setting `$ORIGIN:$ORIGIN/lib` on the binary was tried first and does not
- * work here: the loader never consults it and falls through to the host cache.
- * `LD_LIBRARY_PATH` is the mechanism that is verified to work, so the package
- * ships a launcher that sets it.
+ * Why not `LD_LIBRARY_PATH`
+ * -------------------------
+ * It was the first mechanism tried, and it works for the main process — but it
+ * is inherited by every process the application spawns. Host tools then load
+ * the bundled glibc/GTK and die: `zenity`, used for the workspace directory
+ * picker, segfaulted on every invocation and the UI reported "directory picker
+ * failed". RPATH is scoped to the binary that carries it, so it cannot leak.
+ *
+ * `DT_RUNPATH` is not sufficient either — it is not searched transitively for
+ * the dependency chain, which is what `--force-rpath` addresses.
  *
  * Ordering constraint
  * -------------------
@@ -45,7 +49,7 @@ export const INSTALLED_APP_DIR = '/opt/DSH Desktop'
 /** Directory name holding the bundled loader and libraries inside the app. */
 export const BUNDLED_LIBRARY_DIRNAME = 'lib'
 
-/** Name of the shell launcher that supplies LD_LIBRARY_PATH. */
+/** Name of the shell launcher that prepares the application's runtime environment. */
 export const LAUNCHER_FILENAME = 'dsh-desktop-launch'
 
 /**
