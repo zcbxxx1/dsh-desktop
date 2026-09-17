@@ -438,6 +438,10 @@
       {
         "from": "build/dsh-desktop-launch",
         "to": "dsh-desktop-launch"
+      },
+      {
+        "from": "build/libmesa_compat.so",
+        "to": "libmesa_compat.so"
       }
     ]
   },
