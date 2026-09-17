@@ -2,6 +2,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { chmodSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,6 +50,29 @@ function expandLibraryBundle(desktopRoot: string, log: (message: string) => void
     `dsh-plugin-desktop: expanded ${LIBRARY_BUNDLE_ARCHIVE} into `
     + `${LIBRARY_BUNDLE_DIRECTORY} (${String(readdirSync(directory).length)} entries)`,
   )
+}
+
+/**
+ * Make the shipped launcher executable.
+ *
+ * The executable bit cannot be relied upon to survive transport: committing the
+ * script through the GitHub Contents API stores it as a regular 0644 blob, so
+ * `extraFiles` copies it without the bit and the installed desktop entry cannot
+ * start the application. Setting the mode here makes the build independent of
+ * how the file reached the working tree.
+ * @param desktopRoot - Desktop workspace root.
+ * @param log - Progress reporter.
+ */
+function ensureLauncherIsExecutable(desktopRoot: string, log: (message: string) => void): void {
+  const launcher = join(desktopRoot, 'build', 'dsh-desktop-launch')
+  if (!existsSync(launcher)) {
+    throw new Error(
+      'dsh-plugin-desktop: build/dsh-desktop-launch is missing; the packaged '
+      + 'application would have no entry point',
+    )
+  }
+  chmodSync(launcher, 0o755)
+  log('dsh-plugin-desktop: marked build/dsh-desktop-launch executable (0755)')
 }
 
 /** Injectable native Linux packaging boundary used by focused tests. */
@@ -156,6 +180,7 @@ export function packageLinuxDeb(
   const cleanEnvironment = withoutMacReleaseSecrets(options.env)
   options.log('Building an unsigned Linux arm64 Debian package; signing is not applicable.')
   expandLibraryBundle(options.desktopRoot, options.log)
+  ensureLauncherIsExecutable(options.desktopRoot, options.log)
   options.prepareRuntime()
   options.run(
     options.nodeExecutable,
