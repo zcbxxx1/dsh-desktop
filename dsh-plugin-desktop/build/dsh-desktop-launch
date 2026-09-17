@@ -2,18 +2,17 @@
 # Launch the packaged DSH Desktop against its bundled runtime libraries.
 #
 # The package carries its own dynamic loader and library set under `lib/`
-# (extracted from Ubuntu 22.04). The main executable has been retargeted at
-# `lib/ld-linux-aarch64.so.1`, so the kernel already uses the bundled loader;
-# this script only has to point the loader at the bundled libraries.
+# (Ubuntu 22.04 glibc 2.35 + GTK 3.24.33 + GLib 2.72, with the GPU stack left to
+# the host). The main executable has been rewritten to load that loader
+# (`PT_INTERP`) and to find those libraries through `DT_RPATH` of
+# `$ORIGIN:$ORIGIN/lib`.
 #
-# `DT_RUNPATH` / `$ORIGIN` was tried first and does not work on the target
-# system: the loader never consults it and falls through to the host cache,
-# which yields a mismatched glibc. `LD_LIBRARY_PATH` is the mechanism that is
-# verified to work.
-#
-# The bundled loader and libraries must be found by absolute path because the
-# ELF interpreter entry is an absolute path. The script resolves its own
-# directory so the application keeps working if the install prefix changes.
+# `LD_LIBRARY_PATH` is deliberately NOT used. RPATH is searched transitively for
+# the whole dependency chain, so the bundled libraries resolve each other with no
+# environment involvement — and, critically, host tools the application shells
+# out to keep using the host's libraries. Exporting `LD_LIBRARY_PATH` instead
+# made `zenity` (the directory picker) load the bundled glibc/GTK and die with
+# SIGSEGV, which surfaced as "directory picker failed" in the UI.
 
 set -eu
 
@@ -35,9 +34,24 @@ fi
 unset ELECTRON_RUN_AS_NODE
 unset NODE_OPTIONS
 
-# Prepend so the bundled set wins, but keep any caller-supplied entries.
-LD_LIBRARY_PATH="$DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export LD_LIBRARY_PATH
+# Some vendors patch their own glibc with symbols that their Mesa/GLX and Vulkan
+# drivers link against — Kylin V10 SP1 exports mesa_memcpy, mesa_memmove and
+# mesa_memset. The bundled stock glibc does not provide them, so the host's GL
+# libraries fail to resolve and Chromium's GPU process dies in a restart loop.
+# The shim built at package time re-exports them under the expected version tag;
+# the names are vendor-specific, so preloading is inert on hosts that do not
+# need it.
+if [ -r "$DIR/libmesa_compat.so" ]; then
+  LD_PRELOAD="$DIR/libmesa_compat.so${LD_PRELOAD:+:$LD_PRELOAD}"
+  export LD_PRELOAD
+fi
+
+# Force the vendor X11 path. /opt/x11-wayland/x11-ext.sh does exactly this for
+# Kirin parts, and it is load-bearing: with XDG_SESSION_TYPE=wayland inherited
+# from the desktop session the app dies with SIGSEGV before any window appears,
+# while X11 mode starts cleanly. WAYLAND_DISPLAY is dropped for the same reason.
+export XDG_SESSION_TYPE=x11
+unset WAYLAND_DISPLAY
 
 # The GPU stack is deliberately NOT bundled: vendor GPU drivers are
 # machine-specific, so the system's own Mesa/driver set must stay authoritative.
@@ -47,13 +61,6 @@ if [ -r /etc/vulkan/icd.d/maleoon_vulkan.json ]; then
   VK_ICD_FILENAMES=/etc/vulkan/icd.d/maleoon_vulkan.json
   export VK_ICD_FILENAMES
 fi
-
-# Force the vendor X11 path. /opt/x11-wayland/x11-ext.sh does exactly this for
-# Kirin parts, and it is load-bearing: with XDG_SESSION_TYPE=wayland inherited
-# from the desktop session the app dies with SIGSEGV before any window appears,
-# while X11 mode starts cleanly. WAYLAND_DISPLAY is dropped for the same reason.
-export XDG_SESSION_TYPE=x11
-unset WAYLAND_DISPLAY
 
 # Chromium's sandbox needs either a setuid `chrome-sandbox` helper or working
 # unprivileged user namespaces. This package ships the helper without the setuid
