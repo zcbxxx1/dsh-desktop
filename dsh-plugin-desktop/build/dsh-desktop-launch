@@ -37,13 +37,25 @@ unset NODE_OPTIONS
 # Some vendors patch their own glibc with symbols that their Mesa/GLX and Vulkan
 # drivers link against — Kylin V10 SP1 exports mesa_memcpy, mesa_memmove and
 # mesa_memset. The bundled stock glibc does not provide them, so the host's GL
-# libraries fail to resolve and Chromium's GPU process dies in a restart loop.
-# The shim built at package time re-exports them under the expected version tag;
-# the names are vendor-specific, so preloading is inert on hosts that do not
-# need it.
+# libraries fail to resolve, Chromium's GPU process dies on every attempt, and
+# the browser eventually gives up with "GPU process isn't usable. Goodbye." —
+# which takes the whole application down. The shim built at package time
+# re-exports them under the expected version tag; the names are vendor-specific,
+# so preloading is inert on hosts that do not need it.
+#
+# LD_PRELOAD splits on whitespace as well as colons, so the install path's space
+# ("/opt/DSH Desktop") cannot be used directly — it truncates to "/opt/DSH" and
+# the loader silently ignores the entry. Stage a space-free symlink instead.
 if [ -r "$DIR/libmesa_compat.so" ]; then
-  LD_PRELOAD="$DIR/libmesa_compat.so${LD_PRELOAD:+:$LD_PRELOAD}"
-  export LD_PRELOAD
+  shim_root="${XDG_RUNTIME_DIR:-/tmp}/dsh-desktop-shim"
+  if mkdir -p "$shim_root" 2>/dev/null \
+    && ln -sf "$DIR/libmesa_compat.so" "$shim_root/libmesa_compat.so" 2>/dev/null \
+    && [ -r "$shim_root/libmesa_compat.so" ]; then
+    LD_PRELOAD="$shim_root/libmesa_compat.so${LD_PRELOAD:+:$LD_PRELOAD}"
+    export LD_PRELOAD
+  else
+    echo "dsh-desktop-launch: vendor glibc shim could not be staged; host GL drivers may fail" >&2
+  fi
 fi
 
 # Force the vendor X11 path. /opt/x11-wayland/x11-ext.sh does exactly this for
