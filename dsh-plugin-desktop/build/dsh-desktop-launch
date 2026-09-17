@@ -84,4 +84,31 @@ case " $* " in
   *) set -- --no-sandbox "$@" ;;
 esac
 
+# Disable the GPU process unless the caller asks for it.
+#
+# On hosts whose Mesa cannot load a driver for the installed GPU — Kylin V10 SP1
+# has no `hisi-dpu_dri.so` in any DRI search path — the GPU process dies on every
+# launch. Chromium restarts it a few times and then aborts the browser process,
+# and in the meantime the renderer never paints: the application logs
+# "renderer surface watchdog: page has no visible content" and the UI stalls.
+# Measured on the affected host, dropping the GPU process takes the crash count
+# from three per run to zero and the app stays up.
+#
+# The application is fully usable under software rendering, which is what it
+# falls back to anyway. Pass `--enable-gpu` to keep the GPU process when the
+# host's driver stack does work; the flag is consumed here and not forwarded.
+want_gpu=0
+remaining=$#
+while [ "$remaining" -gt 0 ]; do
+  arg=$1
+  shift
+  case "$arg" in
+    --enable-gpu) want_gpu=1 ;;
+    --disable-gpu) want_gpu=1; set -- "$@" "$arg" ;;
+    *) set -- "$@" "$arg" ;;
+  esac
+  remaining=$((remaining - 1))
+done
+[ "$want_gpu" -eq 1 ] || set -- "$@" --disable-gpu
+
 exec "$DIR/dsh-desktop" "$@"
