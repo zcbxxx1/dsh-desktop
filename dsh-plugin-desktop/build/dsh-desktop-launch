@@ -1,0 +1,45 @@
+#!/bin/sh
+# Launch the packaged DSH Desktop against its bundled runtime libraries.
+#
+# The package carries its own dynamic loader and library set under `lib/`
+# (extracted from Ubuntu 22.04). The main executable has been retargeted at
+# `lib/ld-linux-aarch64.so.1`, so the kernel already uses the bundled loader;
+# this script only has to point the loader at the bundled libraries.
+#
+# `DT_RUNPATH` / `$ORIGIN` was tried first and does not work on the target
+# system: the loader never consults it and falls through to the host cache,
+# which yields a mismatched glibc. `LD_LIBRARY_PATH` is the mechanism that is
+# verified to work.
+#
+# The bundled loader and libraries must be found by absolute path because the
+# ELF interpreter entry is an absolute path. The script resolves its own
+# directory so the application keeps working if the install prefix changes.
+
+set -eu
+
+SELF=$0
+case "$SELF" in
+  */*) ;;
+  *) SELF=$(command -v -- "$SELF" || printf '%s' "$SELF") ;;
+esac
+DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
+
+if [ ! -x "$DIR/dsh-desktop" ]; then
+  echo "dsh-desktop-launch: missing $DIR/dsh-desktop" >&2
+  exit 1
+fi
+
+# Prepend so the bundled set wins, but keep any caller-supplied entries.
+LD_LIBRARY_PATH="$DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH
+
+# The GPU stack is deliberately NOT bundled: vendor GPU drivers are
+# machine-specific, so the system's own Mesa/driver set must stay authoritative.
+# Only pin the Vulkan ICD when the vendor one is present, to avoid the generic
+# Mesa package's unrelated AMD ICD crashing the GPU process.
+if [ -r /etc/vulkan/icd.d/maleoon_vulkan.json ]; then
+  VK_ICD_FILENAMES=/etc/vulkan/icd.d/maleoon_vulkan.json
+  export VK_ICD_FILENAMES
+fi
+
+exec "$DIR/dsh-desktop" "$@"
