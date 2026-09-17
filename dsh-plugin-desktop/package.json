@@ -130,6 +130,7 @@
     "dist:mac-smoke": "node scripts/package-mac.ts",
     "dist:win": "node scripts/package-win.ts",
     "dist:win-portable": "node scripts/package-win-portable.ts",
+    "dist:linux-deb": "node scripts/package-linux-deb.ts",
     "prepack": "yarn run check",
     "verify:aa": "DSH_VERIFY_AA=1 node scripts/verify-profile-boot.mjs",
     "prepare:electron-native": "node scripts/prepare-fs-ext.ts"
@@ -330,8 +331,8 @@
     "appId": "ai.deepseek.dsh.desktop",
     "productName": "DSH Desktop",
     "asar": false,
-    "afterPack": "./scripts/verify-packaged-runtime.ts",
-    "afterAllArtifactBuild": "./scripts/verify-electron-fuses.ts",
+    "afterPack": "./scripts/after-pack-linux.ts",
+    "afterAllArtifactBuild": "./scripts/after-all-artifact-build.ts",
     "electronFuses": {
       "enableEmbeddedAsarIntegrityValidation": false,
       "onlyLoadAppFromAsar": false,
@@ -414,9 +415,31 @@
       "target": [
         "dir"
       ],
-      "icon": "build/app-icon.png",
-      "asar": false
+      "icon": "build/icons",
+      "asar": false,
+      "executableName": "dsh-desktop",
+      "category": "Development",
+      "maintainer": "zcbxxx1 <zcbxxx1@users.noreply.github.com>",
+      "synopsis": "DeepSeek Harness desktop client",
+      "description": "DeepSeek Harness Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin.",
+      "syncDesktopName": true
     },
-    "npmRebuild": false
-  }
+    "npmRebuild": false,
+    "deb": {
+      "packageName": "dsh-desktop",
+      "artifactName": "dsh-desktop_${version}_${arch}.${ext}",
+      "afterInstall": "build/deb-after-install.tpl"
+    },
+    "extraFiles": [
+      {
+        "from": "build/lib-bundle",
+        "to": "lib"
+      },
+      {
+        "from": "build/dsh-desktop-launch",
+        "to": "dsh-desktop-launch"
+      }
+    ]
+  },
+  "desktopName": "dsh-desktop.desktop"
 }
