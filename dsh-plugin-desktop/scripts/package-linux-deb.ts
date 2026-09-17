@@ -75,6 +75,42 @@ function ensureLauncherIsExecutable(desktopRoot: string, log: (message: string) 
   log('dsh-plugin-desktop: marked build/dsh-desktop-launch executable (0755)')
 }
 
+/**
+ * Compile the vendor-glibc symbol shim shipped beside the launcher.
+ *
+ * Some vendors patch their own glibc with symbols their Mesa/GLX and Vulkan
+ * drivers link against — Kylin V10 SP1 exports `mesa_memcpy`, `mesa_memmove`
+ * and `mesa_memset`. Under the stock glibc this package bundles those libraries
+ * fail to resolve, so the GPU process dies in a restart loop. Building the shim
+ * here keeps it reproducible from committed source instead of shipping a blob.
+ * @param desktopRoot - Desktop workspace root.
+ * @param log - Progress reporter.
+ */
+function buildMesaCompatShim(desktopRoot: string, log: (message: string) => void): void {
+  const buildDir = join(desktopRoot, 'build')
+  const source = join(buildDir, 'mesa-compat.c')
+  const versionScript = join(buildDir, 'mesa-compat.map')
+  const output = join(buildDir, 'libmesa_compat.so')
+
+  for (const required of [source, versionScript]) {
+    if (!existsSync(required)) {
+      throw new Error(`dsh-plugin-desktop: missing ${required} for the vendor glibc shim`)
+    }
+  }
+
+  const result = spawnSync('gcc', [
+    '-shared', '-fPIC', '-O2',
+    '-o', output, source,
+    `-Wl,--version-script=${versionScript}`,
+    '-Wl,-soname,libmesa_compat.so',
+  ], { stdio: 'inherit' })
+  if (result.error !== undefined) throw result.error
+  if (result.status !== 0) {
+    throw new Error(`gcc failed to build the vendor glibc shim (exit ${String(result.status)})`)
+  }
+  log('dsh-plugin-desktop: built build/libmesa_compat.so')
+}
+
 /** Injectable native Linux packaging boundary used by focused tests. */
 export interface LinuxDebPackageOptions {
   /** Environment inherited by the packaging command. */
@@ -181,6 +217,7 @@ export function packageLinuxDeb(
   options.log('Building an unsigned Linux arm64 Debian package; signing is not applicable.')
   expandLibraryBundle(options.desktopRoot, options.log)
   ensureLauncherIsExecutable(options.desktopRoot, options.log)
+  buildMesaCompatShim(options.desktopRoot, options.log)
   options.prepareRuntime()
   options.run(
     options.nodeExecutable,
