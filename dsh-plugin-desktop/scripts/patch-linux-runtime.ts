@@ -49,6 +49,25 @@ export const BUNDLED_LIBRARY_DIRNAME = 'lib'
 export const LAUNCHER_FILENAME = 'dsh-desktop-launch'
 
 /**
+ * Directory where the distribution keeps the NSS backend modules.
+ *
+ * NSS opens `libsoftokn3.so` and `libnssckbi.so` by bare name, and those live in
+ * a `nss` subdirectory that no default search path covers — on the systems that
+ * hit this it is not even present in the loader cache. Appending this directory
+ * to the executable's RPATH is what makes the modules resolvable, which in turn
+ * lets Chromium's NSS initialisation succeed.
+ * @returns Absolute directory path for the architecture being packaged.
+ */
+export function vendorNssDirectory(): string {
+  const multiarch = process.arch === 'arm64'
+    ? 'aarch64'
+    : process.arch === 'x64'
+      ? 'x86_64'
+      : process.arch
+  return `/usr/lib/${multiarch}-linux-gnu/nss`
+}
+
+/**
  * Make the runtime library path resolvable on the build host.
  *
  * `PT_INTERP` is an absolute path, so once the packaged binary points at
@@ -163,7 +182,15 @@ export function patchLinuxRuntime(options: LinuxRuntimePatchOptions): void {
   //
   // `--force-rpath` matters: plain `--set-rpath` writes DT_RUNPATH, which is
   // not transitive and is not consulted the same way here.
-  const rpath = '$ORIGIN:$ORIGIN/lib'
+  //
+  // The vendor NSS module directory is appended because NSS loads its backend
+  // by bare name (`dlopen("libsoftokn3.so")`), and those modules live in a
+  // subdirectory that is not on any default search path — it is not even in the
+  // loader cache on the affected systems. Without it Chromium's NSS
+  // initialisation fails with `nss_error=-5925` and aborts the whole browser
+  // process, which is what made the application exit on its own some seconds
+  // after start.
+  const rpath = `$ORIGIN:$ORIGIN/lib:${vendorNssDirectory()}`
   run(['--force-rpath', '--set-rpath', rpath, '--set-interpreter', interpreter, executable])
   log(`dsh-plugin-desktop: retargeted ${executable} (interpreter ${interpreter}, rpath ${rpath})`)
 
