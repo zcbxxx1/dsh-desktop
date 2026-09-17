@@ -1,8 +1,7 @@
 /** Build an unsigned Linux arm64 Debian package on a native Linux arm64 host. */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
-import { chmodSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,11 +34,10 @@ function expandLibraryBundle(desktopRoot: string, log: (message: string) => void
       + 'the Debian package would not carry its own glibc/GTK set',
     )
   }
-  if (existsSync(directory) && readdirSync(directory).length > 0) {
-    log(`dsh-plugin-desktop: reusing expanded runtime libraries at ${LIBRARY_BUNDLE_DIRECTORY}`)
-    return
-  }
-
+  // Always re-expand: a leftover directory from an earlier build would silently
+  // shadow an updated archive, which is exactly the kind of drift that makes a
+  // local build disagree with CI.
+  rmSync(directory, { recursive: true, force: true })
   mkdirSync(directory, { recursive: true })
   const result = spawnSync('tar', ['-xzf', archive, '-C', directory], { stdio: 'inherit' })
   if (result.error !== undefined) throw result.error
