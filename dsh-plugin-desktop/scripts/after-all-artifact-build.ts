@@ -1,18 +1,20 @@
 /**
  * Combined `afterAllArtifactBuild` hook for dsh-plugin-desktop.
  *
- * The upstream verifier does two things per packaged context: it checks the
- * Electron fuse wire, then runs a packaged-runtime smoke test that executes the
- * binary. On Linux the binary has already been retargeted at the bundled loader
- * by `afterPack`, and that loader resolves the bundled libraries from
- * `LD_LIBRARY_PATH` — which is exactly what the shipped launcher sets at run
- * time. This wrapper supplies the same variable for the build-host smoke test so
- * the final verification still exercises the real, retargeted binary rather than
- * being skipped.
+ * The upstream verifier checks the Electron fuse wire and then runs a
+ * packaged-runtime smoke test that executes the binary. On Linux the binary has
+ * already been retargeted by `afterPack` at a runtime-only interpreter path, so
+ * the smoke test can only run when that path also resolves on the build host —
+ * `afterPack` aliases it, see `ensureRuntimeLibraryPath`.
  *
- * When the runtime library path could not be aliased on the build host the smoke
- * test is skipped with an explicit message; the same suite already ran in
- * `afterPack`, before the retargeting.
+ * The bundled libraries themselves need no help here: the retargeting uses
+ * `DT_RPATH`, which the loader resolves without any environment variable. That
+ * matters beyond convenience — exporting `LD_LIBRARY_PATH` instead would leak
+ * into every process the application spawns and break host tools such as the
+ * zenity directory picker.
+ *
+ * When the runtime path could not be aliased the smoke test is skipped with an
+ * explicit message; the same suite already ran in `afterPack`.
  *
  * macOS and Windows keep their existing behaviour: the upstream hook is called
  * unchanged.
@@ -29,35 +31,19 @@ import { BUNDLED_LIBRARY_DIRNAME, INSTALLED_APP_DIR } from './patch-linux-runtim
 /** Runtime library directory the packaged binary's interpreter points at. */
 const RUNTIME_LIBRARY_DIR = join(INSTALLED_APP_DIR, BUNDLED_LIBRARY_DIRNAME)
 
-function smokeWithBundledLibraries(context: PackagedRuntimeContext): void {
-  if (context.electronPlatformName !== 'linux') {
-    smokePackagedElectronRuntime(context)
-    return
-  }
-
-  if (!existsSync(RUNTIME_LIBRARY_DIR)) {
+function smokeOrSkip(context: PackagedRuntimeContext): void {
+  if (context.electronPlatformName === 'linux' && !existsSync(RUNTIME_LIBRARY_DIR)) {
     process.stdout.write(
       `dsh-plugin-desktop: skipping the final packaged-runtime smoke test because `
       + `${RUNTIME_LIBRARY_DIR} is absent on this build host; the same suite ran in afterPack\n`,
     )
     return
   }
-
-  const previous = process.env.LD_LIBRARY_PATH
-  process.env.LD_LIBRARY_PATH = previous === undefined || previous === ''
-    ? RUNTIME_LIBRARY_DIR
-    : `${RUNTIME_LIBRARY_DIR}:${previous}`
-
-  try {
-    smokePackagedElectronRuntime(context)
-  } finally {
-    if (previous === undefined) delete process.env.LD_LIBRARY_PATH
-    else process.env.LD_LIBRARY_PATH = previous
-  }
+  smokePackagedElectronRuntime(context)
 }
 
 export async function afterAllArtifactBuild(result: ElectronArtifactBuildResult): Promise<string[]> {
-  return verifyAfterAllArtifactBuild(result, undefined, undefined, smokeWithBundledLibraries)
+  return verifyAfterAllArtifactBuild(result, undefined, undefined, smokeOrSkip)
 }
 
 export default afterAllArtifactBuild
