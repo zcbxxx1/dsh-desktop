@@ -148,8 +148,24 @@ export function patchLinuxRuntime(options: LinuxRuntimePatchOptions): void {
     )
   }
 
-  run(['--set-interpreter', interpreter, executable])
-  log(`dsh-plugin-desktop: retargeted ${executable} at ${interpreter}`)
+  // Two rewrites, both on the executable only:
+  //
+  //   * PT_INTERP selects the loader, and therefore the libc.
+  //   * DT_RPATH (not DT_RUNPATH) resolves the bundled libraries. RPATH is
+  //     searched transitively for the whole dependency chain, so the bundled
+  //     libraries find each other without any of them being rewritten, and it
+  //     keeps working without LD_LIBRARY_PATH.
+  //
+  // Using LD_LIBRARY_PATH instead was tried and rejected: the variable is
+  // inherited by every process the application spawns, so host tools it shells
+  // out to — the zenity directory picker in particular — loaded the bundled
+  // glibc/GTK and died with SIGSEGV.
+  //
+  // `--force-rpath` matters: plain `--set-rpath` writes DT_RUNPATH, which is
+  // not transitive and is not consulted the same way here.
+  const rpath = '$ORIGIN:$ORIGIN/lib'
+  run(['--force-rpath', '--set-rpath', rpath, '--set-interpreter', interpreter, executable])
+  log(`dsh-plugin-desktop: retargeted ${executable} (interpreter ${interpreter}, rpath ${rpath})`)
 
   // The crash handler is exec'd by the main process and needs the same loader;
   // without it every crash-report spawn fails with a missing-interpreter error.
@@ -157,7 +173,7 @@ export function patchLinuxRuntime(options: LinuxRuntimePatchOptions): void {
   if (existsSync(crashpad)) {
     try {
       renameSync(crashpad, `${crashpad}.orig`)
-      run(['--set-interpreter', interpreter, `${crashpad}.orig`])
+      run(['--force-rpath', '--set-rpath', rpath, '--set-interpreter', interpreter, `${crashpad}.orig`])
       renameSync(`${crashpad}.orig`, crashpad)
       log('dsh-plugin-desktop: retargeted chrome_crashpad_handler')
     } catch (error) {
