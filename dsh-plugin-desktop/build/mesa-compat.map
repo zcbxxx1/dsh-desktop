@@ -1,0 +1,11 @@
+/* Version script for mesa-compat.c.
+ *
+ * The host libraries that reference these symbols expect them under the
+ * GLIBC_2.17 version tag, so the shim has to publish them there rather than as
+ * plain unversioned exports. */
+GLIBC_2.17 {
+  global:
+    mesa_memcpy;
+    mesa_memmove;
+    mesa_memset;
+};
